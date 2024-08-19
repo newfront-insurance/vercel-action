@@ -103,63 +103,60 @@ async function vercelDeploy(ref, commit) {
   let myError = '';
   const options = {};
   options.listeners = {
-    stdout: data => {
-      myOutput += data.toString();
-      core.info(data.toString());
-    },
-    stderr: data => {
-      // eslint-disable-next-line no-unused-vars
-      myError += data.toString();
-      core.info(data.toString());
-    },
+      stdout: data => {
+          myOutput += data.toString();
+          core.info(data.toString());
+      },
+      stderr: data => {
+          // eslint-disable-next-line no-unused-vars
+          myError += data.toString();
+          core.info(data.toString());
+      },
   };
   if (workingDirectory) {
-    options.cwd = workingDirectory;
+      options.cwd = workingDirectory;
   }
 
   const providedArgs = vercelArgs.split(/ +/);
-
   const args = [
-    ...vercelArgs.split(/ +/),
-    ...['-t', vercelToken],
-    ...addVercelMetadata('githubCommitSha', context.sha, providedArgs),
-    ...addVercelMetadata('githubCommitAuthorName', context.actor, providedArgs),
-    ...addVercelMetadata(
-      'githubCommitAuthorLogin',
-      context.actor,
-      providedArgs,
-    ),
-    ...addVercelMetadata('githubDeployment', 1, providedArgs),
-    ...addVercelMetadata('githubOrg', context.repo.owner, providedArgs),
-    ...addVercelMetadata('githubRepo', context.repo.repo, providedArgs),
-    ...addVercelMetadata('githubCommitOrg', context.repo.owner, providedArgs),
-    ...addVercelMetadata('githubCommitRepo', context.repo.repo, providedArgs),
-    ...addVercelMetadata('githubCommitMessage', `"${commit}"`, providedArgs),
-    ...addVercelMetadata(
-      'githubCommitRef',
-      ref.replace('refs/heads/', ''),
-      providedArgs,
-    ),
+      ...providedArgs,
+      '-t', vercelToken,
+      ...addVercelMetadata('githubCommitSha', context.sha, providedArgs),
+      ...addVercelMetadata('githubCommitAuthorName', context.actor, providedArgs),
+      ...addVercelMetadata('githubCommitAuthorLogin', context.actor, providedArgs),
+      ...addVercelMetadata('githubDeployment', 1, providedArgs),
+      ...addVercelMetadata('githubOrg', context.repo.owner, providedArgs),
+      ...addVercelMetadata('githubRepo', context.repo.repo, providedArgs),
+      ...addVercelMetadata('githubCommitOrg', context.repo.owner, providedArgs),
+      ...addVercelMetadata('githubCommitRepo', context.repo.repo, providedArgs),
+      ...addVercelMetadata('githubCommitMessage', `"${commit}"`, providedArgs),
+      ...addVercelMetadata('githubCommitRef', ref.replace('refs/heads/', ''), providedArgs),
   ];
 
   if (vercelScope) {
-    core.info('using scope');
-    args.push('--scope', vercelScope);
+      core.info('using scope');
+      args.push('--scope', vercelScope);
   }
 
   await exec.exec('npx', [VERCEL_BIN, ...args], options);
 
-  return myOutput;
+  // Assuming the deployment URL is extracted from myOutput
+  const deploymentUrl = extractDeploymentUrl(myOutput);  // You need to define extractDeploymentUrl
+  
+  const inspectorUrl = `https://vercel.com/${vercelProjectName}/${deploymentUrl}`;
+
+  return {
+      deploymentUrl,    // Original deployment URL
+      inspectorUrl,     // New inspector URL
+  };
 }
 
 async function vercelInspect(deploymentUrl) {
-  // eslint-disable-next-line no-unused-vars
   let myOutput = '';
   let myError = '';
   const options = {};
   options.listeners = {
     stdout: data => {
-      // eslint-disable-next-line no-unused-vars
       myOutput += data.toString();
       core.info(data.toString());
     },
@@ -181,7 +178,10 @@ async function vercelInspect(deploymentUrl) {
   await exec.exec('npx', args, options);
 
   const match = myError.match(/^\s+name\s+(.+)$/m);
-  return match && match.length ? match[1] : null;
+  const deploymentName = match && match.length ? match[1] : null;
+  const inspectorUrl = deploymentUrl ? `https://vercel.com/${deploymentName}/${deploymentUrl}` : null;
+
+  return { deploymentName, inspectorUrl };
 }
 
 async function findCommentsForEvent() {
@@ -347,7 +347,6 @@ async function aliasDomainsToDeployment(deploymentUrl) {
   });
   await Promise.all(promises);
 }
-
 async function run() {
   core.debug(`action : ${context.action}`);
   core.debug(`ref : ${context.ref}`);
@@ -400,13 +399,19 @@ async function run() {
     core.warning('get preview-url error');
   }
 
-  const deploymentName =
-    vercelProjectName || (await vercelInspect(deploymentUrl));
+  const { deploymentName, inspectorUrl } = await vercelInspect(deploymentUrl);
   if (deploymentName) {
     core.info('set preview-name output');
     core.setOutput('preview-name', deploymentName);
   } else {
     core.warning('get preview-name error');
+  }
+
+  if (inspectorUrl) {
+    core.info('set inspector-url output');
+    core.setOutput('inspector-url', inspectorUrl);
+  } else {
+    core.warning('get inspector-url error');
   }
 
   if (aliasDomains.length) {
@@ -426,7 +431,6 @@ async function run() {
     core.info('comment : disabled');
   }
 }
-
 run().catch(error => {
   core.setFailed(error.message);
 });
